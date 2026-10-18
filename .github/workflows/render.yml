@@ -1,0 +1,37 @@
+name: Automated Vlog Render
+
+on:
+  workflow_dispatch:
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install System FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Auto-Editing Pipeline
+        run: python edit_vlog.py
+
+      - name: Upload Finished Vlog
+        uses: actions/upload-artifact@v4
+        with:
+          name: finished-cinematic-vlog
+          path: output/cinematic_long_vlog.mp4
+          retention-days: 7
