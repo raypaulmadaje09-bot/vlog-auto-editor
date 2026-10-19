@@ -26,6 +26,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Auto-Fetch Royalty Free BGM
+        run: |
+          curl -L -o bgm.mp3 "https://cdn.pixabay.com/download/audio/2022/05/27/audio_1808fbf07a.mp3?filename=lofi-study-112191.mp3" || true
+
       - name: Run Auto-Editing Pipeline
         run: python edit_vlog.py
 

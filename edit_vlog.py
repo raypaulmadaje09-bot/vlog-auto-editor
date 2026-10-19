@@ -1,11 +1,8 @@
 """
-Professional Long-Form Adventure Vlog Engine (5-8 Minutes)
-Features:
-- Target Duration Controller: Generates 5-8 min vlog by looping/stretching narrative pacing
-- AI Auto-Subtitles: Generates styled travel subtitles (Yellow text, black border)
-- Pro Cinematic Transitions: Crossfades, dip-to-black, and whip cuts
-- Audio Engineering: Dynamic ducking, boosted ambient foley, and beat-synced BGM
-- Geo Ong Visual Grade: High vibrance, punchy greens, golden tropical skin tones
+Zero-Upload Pro Vlog Editor
+- Self-Generating Whoosh SFX: Synthesizes acoustic whooshes directly via NumPy/SciPy
+- Auto-BGM Support: Plays bundled/auto-fetched royalty-free ambient track
+- 5-8 Minute Dynamic Pacing & Geo Ong Tropical Grading
 """
 
 import os
@@ -16,22 +13,32 @@ from moviepy.editor import (
     VideoFileClip,
     AudioFileClip,
     CompositeAudioClip,
-    CompositeVideoClip,
-    TextClip,
     concatenate_videoclips,
     vfx
 )
+from moviepy.audio.AudioClip import AudioArrayClip
+
+def generate_synthetic_whoosh(duration=0.5, fps=44100):
+    """Generates an organic cinematic whoosh using noise modulation without any audio files."""
+    t = np.linspace(0, 1, int(fps * duration))
+    # Gaussian envelope para sa smooth whoosh sweep
+    envelope = np.exp(-((t - 0.5) ** 2) / (2 * (0.12 ** 2)))
+    # Frequency modulation sweep
+    freq = 150 + 600 * envelope
+    noise = np.random.uniform(-1, 1, len(t))
+    # Sound shaping
+    signal = noise * envelope * np.sin(2 * np.pi * freq * t)
+    signal = signal / (np.max(np.abs(signal)) + 1e-6) # Normalize
+    stereo = np.column_stack((signal, signal))
+    return AudioArrayClip(stereo, fps=fps).volumex(0.35)
 
 def geo_ong_color_grade(clip):
-    """Warm, high-contrast, punchy tropical colors."""
-    # Contrast boost (+18%)
+    """Warm, saturated adventure colors."""
     graded = clip.fx(vfx.lum_contrast, lum=3, contrast=0.18, contrast_thr=128)
-    # Saturation boost (+15%)
     graded = graded.fx(vfx.colorx, 1.15)
     return graded
 
 def add_smooth_motion(clip, zoom_speed=0.03):
-    """Dynamic subtle camera push-in."""
     def effect(get_frame, t):
         img = get_frame(t)
         h, w = img.shape[:2]
@@ -46,56 +53,17 @@ def add_smooth_motion(clip, zoom_speed=0.03):
     except Exception:
         return clip
 
-def generate_subtitles(video_clip):
-    """Extracts audio and generates styled subtitles using Whisper AI."""
-    try:
-        import whisper
-        print("Transcribing audio for subtitles using Whisper AI...")
-        temp_audio = "temp_voice.wav"
-        video_clip.audio.write_audiofile(temp_audio, fps=16000, nbytes=2, codec='pcm_s16le', verbose=False, logger=None)
-        
-        model = whisper.load_model("base")
-        result = model.transcribe(temp_audio)
-        
-        subtitle_clips = []
-        for seg in result.get("segments", []):
-            txt = seg["text"].strip()
-            start = seg["start"]
-            end = seg["end"]
-            if not txt:
-                continue
-            
-            # Geo Ong Style Subtitles: Bold, Yellow with black outline
-            txt_clip = (TextClip(txt, fontsize=36, font="Arial-Bold", color="yellow", stroke_color="black", stroke_width=2)
-                        .set_position(('center', 0.82), relative=True)
-                        .set_start(start)
-                        .set_end(end))
-            subtitle_clips.append(txt_clip)
-            
-        if os.path.exists(temp_audio):
-            os.remove(temp_audio)
-            
-        return subtitle_clips
-    except Exception as e:
-        print(f"Subtitles skipped or Whisper unavailable: {e}")
-        return []
-
 def process_clip(file_path, duration=7.5):
-    """Trims, stabilizes duration, grades, and adds crossfade handles."""
     clip = VideoFileClip(file_path)
     if clip.duration > duration:
         start_t = (clip.duration - duration) / 2
         clip = clip.subclip(start_t, start_t + duration)
-        
     clip = geo_ong_color_grade(clip)
     clip = add_smooth_motion(clip)
-    # Seamless crossfade transition
-    clip = clip.crossfadein(0.5)
     return clip
 
 def build_vlog():
     footage_dir = "footage"
-    audio_dir = "audio"
     output_dir = "output"
     os.makedirs(output_dir, exist_ok=True)
 
@@ -106,77 +74,57 @@ def build_vlog():
     files.sort()
 
     if not files:
-        print("Walang video clips sa loob ng footage folder!")
+        print("Walang video clips sa loob ng footage/ folder!")
         return
 
-    print(f"Loaded {len(files)} raw clips.")
-    
-    # Target duration: 330 seconds (5.5 minutes)
-    TARGET_TOTAL_SECONDS = 330.0 
-    
-    # 1. Timeline assembly with 5-8 minutes pacing
+    TARGET_TOTAL_SECONDS = 330.0  # 5.5 minutes target
     timeline_clips = []
-    current_duration = 0.0
-    
-    # Hook: High-energy teaser shots (first 10 seconds)
-    if len(files) >= 2:
-        print("Crafting High-Retention Hook...")
-        teaser1 = VideoFileClip(files[-1]).subclip(0, min(3.0, VideoFileClip(files[-1]).duration))
-        teaser2 = VideoFileClip(files[0]).subclip(0, min(3.5, VideoFileClip(files[0]).duration))
-        timeline_clips.extend([geo_ong_color_grade(teaser1), geo_ong_color_grade(teaser2)])
-        current_duration += 6.5
-    
-    # Loop & sequence clips dynamically to reach 5-8 minutes
-    print("Building long-form chapter structure...")
-    while current_duration < TARGET_TOTAL_SECONDS:
-        for f in files:
-            processed = process_clip(f, duration=8.0)
-            timeline_clips.append(processed)
-            current_duration += processed.duration
-            if current_duration >= TARGET_TOTAL_SECONDS:
-                break
-                
-    base_video = concatenate_videoclips(timeline_clips, method="compose")
-    print(f"Timeline Video Duration: {base_video.duration / 60:.2f} minutes")
+    cut_timestamps = []
+    current_time = 0.0
 
-    # 2. Audio mixing & Background Music Layering
-    bgm_files = glob.glob(os.path.join(audio_dir, "*.mp3")) + glob.glob(os.path.join(audio_dir, "*.wav"))
+    print("Building sequence to 5-8 minutes...")
+    while current_time < TARGET_TOTAL_SECONDS:
+        for f in files:
+            processed = process_clip(f, duration=7.5)
+            timeline_clips.append(processed)
+            current_time += processed.duration
+            cut_timestamps.append(current_time)
+            if current_time >= TARGET_TOTAL_SECONDS:
+                break
+
+    base_video = concatenate_videoclips(timeline_clips, method="compose")
+    print(f"Total Video Length: {base_video.duration / 60:.2f} mins")
+
     audio_layers = []
-    
-    # Voice/foley layer (Boosted 120%)
+
+    # 1. Natural Audio
     if base_video.audio is not None:
-        audio_layers.append(base_video.audio.volumex(1.2))
-        
-    if bgm_files:
-        bgm_path = bgm_files[0]
-        print(f"Layering Soundscape & BGM: {bgm_path}")
-        bgm = AudioFileClip(bgm_path)
-        
-        # Loop music to fill 5-8 minutes
+        audio_layers.append(base_video.audio.volumex(1.15))
+
+    # 2. Self-Generated Whoosh on every transition (No files needed!)
+    print(f"Synthesizing {len(cut_timestamps)-1} transition whoosh effects on the fly...")
+    whoosh_sound = generate_synthetic_whoosh(duration=0.45)
+    for cut_t in cut_timestamps[:-1]:
+        start_at = max(0.0, cut_t - 0.22)
+        audio_layers.append(whoosh_sound.set_start(start_at))
+
+    # 3. Auto-downloaded BGM
+    auto_bgm = "bgm.mp3"
+    if os.path.exists(auto_bgm):
+        print("Attaching auto-downloaded background music...")
+        bgm = AudioFileClip(auto_bgm)
         if bgm.duration < base_video.duration:
             bgm = bgm.fx(vfx.audio_loop, duration=base_video.duration)
         else:
             bgm = bgm.subclip(0, base_video.duration)
-            
-        # Audio ducking: 18% volume so speech remains clear
-        bgm = bgm.volumex(0.18).audio_fadein(1.5).audio_fadeout(3.0)
-        audio_layers.append(bgm)
-        
+        audio_layers.append(bgm.volumex(0.18).audio_fadein(1.5).audio_fadeout(3.0))
+
     if audio_layers:
         base_video.audio = CompositeAudioClip(audio_layers)
 
-    # 3. Subtitles Generation Layer
-    subtitles = generate_subtitles(base_video)
-    if subtitles:
-        print("Overlaying AI subtitles...")
-        final_video = CompositeVideoClip([base_video] + subtitles)
-    else:
-        final_video = base_video
-
-    # 4. Final Render
     out_path = os.path.join(output_dir, "cinematic_long_vlog.mp4")
-    print(f"Rendering 5-8 minute vlog to {out_path}...")
-    final_video.write_videofile(
+    print(f"Rendering full automated vlog to {out_path}...")
+    base_video.write_videofile(
         out_path,
         codec="libx264",
         audio_codec="aac",
@@ -184,7 +132,7 @@ def build_vlog():
         preset="fast",
         threads=4
     )
-    print("Render complete! Ready for YouTube/Facebook.")
+    print("All done!")
 
 if __name__ == "__main__":
     build_vlog()
